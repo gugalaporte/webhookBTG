@@ -8,9 +8,20 @@ if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
+const API_KEY = 'finacap2025';
+
 export class WebhookController {
   async handleWebhook(req: Request, res: Response) {
     try {
+      // Validação da API Key
+      const apiKey = req.headers['x-api-key'];
+      if (!apiKey || apiKey !== API_KEY) {
+        console.error('API Key inválida ou não fornecida');
+        return res.status(401).json({
+          message: 'API Key inválida ou não fornecida'
+        });
+      }
+
       const webhookData = req.body;
 
       // Validação básica dos dados
@@ -53,6 +64,15 @@ export class WebhookController {
   // Método auxiliar para listar todos os arquivos de webhook
   async listWebhookFiles(req: Request, res: Response) {
     try {
+      // Validação da API Key também para listagem
+      const apiKey = req.headers['x-api-key'];
+      if (!apiKey || apiKey !== API_KEY) {
+        console.error('API Key inválida ou não fornecida');
+        return res.status(401).json({
+          message: 'API Key inválida ou não fornecida'
+        });
+      }
+
       const files = fs.readdirSync(dataDir);
       const webhooks = files.map(file => {
         const content = fs.readFileSync(path.join(dataDir, file), 'utf-8');
