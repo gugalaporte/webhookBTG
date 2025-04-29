@@ -10,6 +10,22 @@ if (!fs.existsSync(dataDir)) {
 
 const API_KEY = 'finacap2025';
 
+// Interface para os dados do BTG
+interface BTGWebhookResponse {
+  errors: Array<{
+    code: string | null;
+    message: string | null;
+  }>;
+  response: {
+    accountNumber?: string | null;
+    fileSize: number;
+    startDate?: string | null;
+    endDate?: string | null;
+    url: string;
+    lastModified?: string;
+  };
+}
+
 export class WebhookController {
   async handleWebhook(req: Request, res: Response) {
     try {
@@ -22,25 +38,46 @@ export class WebhookController {
         });
       }
 
-      const webhookData = req.body;
+      const webhookData = req.body as BTGWebhookResponse;
 
       // Validação básica dos dados
-      if (!webhookData || Object.keys(webhookData).length === 0) {
-        console.error('Dados da webhook vazios ou inválidos');
+      if (!webhookData || !webhookData.response || !webhookData.response.url) {
+        console.error('Dados da webhook inválidos ou incompletos');
         return res.status(400).json({
-          message: 'Dados inválidos'
+          message: 'Dados inválidos ou incompletos'
         });
       }
 
-      // Dados formatados com timestamp
+      // Determina o tipo de webhook baseado nos dados
+      const isOperationsByAccount = !!webhookData.response.accountNumber;
+      const webhookType = isOperationsByAccount ? 'operations-by-account' : 'positions-by-partner';
+
+      // Dados formatados com metadata
       const dataWithMetadata = {
         timestamp: new Date(),
-        data: webhookData
+        webhookType,
+        data: webhookData,
+        metadata: {
+          accountNumber: webhookData.response.accountNumber || 'N/A',
+          fileSize: webhookData.response.fileSize,
+          period: webhookData.response.startDate && webhookData.response.endDate 
+            ? `${webhookData.response.startDate} até ${webhookData.response.endDate}`
+            : 'N/A',
+          downloadUrl: webhookData.response.url
+        }
       };
 
-      // Salva em arquivo JSON
-      const fileName = `webhook-${Date.now()}.json`;
-      const filePath = path.join(dataDir, fileName);
+      // Cria subdiretório para o tipo de webhook
+      const typeDir = path.join(dataDir, webhookType);
+      if (!fs.existsSync(typeDir)) {
+        fs.mkdirSync(typeDir, { recursive: true });
+      }
+
+      // Salva em arquivo JSON com nome mais descritivo
+      const fileName = `${webhookType}-${
+        webhookData.response.accountNumber || 'partner'
+      }-${Date.now()}.json`;
+      const filePath = path.join(typeDir, fileName);
       
       fs.writeFileSync(
         filePath,
@@ -48,10 +85,14 @@ export class WebhookController {
       );
 
       console.log('Dados salvos em:', filePath);
+      console.log('Tipo de webhook:', webhookType);
+      console.log('URL do arquivo:', webhookData.response.url);
 
       return res.status(200).json({
-        message: 'Webhook recebida com sucesso',
-        fileName
+        message: 'Webhook processada com sucesso',
+        fileName,
+        webhookType,
+        metadata: dataWithMetadata.metadata
       });
     } catch (error) {
       console.error('Erro ao processar webhook:', error);
@@ -64,7 +105,7 @@ export class WebhookController {
   // Método auxiliar para listar todos os arquivos de webhook
   async listWebhookFiles(req: Request, res: Response) {
     try {
-      // Validação da API Key também para listagem
+      // Validação da API Key
       const apiKey = req.headers['x-api-key'];
       if (!apiKey || apiKey !== API_KEY) {
         console.error('API Key inválida ou não fornecida');
@@ -73,16 +114,27 @@ export class WebhookController {
         });
       }
 
-      const files = fs.readdirSync(dataDir);
-      const webhooks = files.map(file => {
-        const content = fs.readFileSync(path.join(dataDir, file), 'utf-8');
-        return {
-          fileName: file,
-          data: JSON.parse(content)
-        };
-      });
+      // Lista webhooks por tipo
+      const webhookTypes = ['operations-by-account', 'positions-by-partner'];
+      const allWebhooks: any = {};
 
-      return res.status(200).json(webhooks);
+      for (const type of webhookTypes) {
+        const typeDir = path.join(dataDir, type);
+        if (fs.existsSync(typeDir)) {
+          const files = fs.readdirSync(typeDir);
+          allWebhooks[type] = files.map(file => {
+            const content = fs.readFileSync(path.join(typeDir, file), 'utf-8');
+            return {
+              fileName: file,
+              data: JSON.parse(content)
+            };
+          });
+        } else {
+          allWebhooks[type] = [];
+        }
+      }
+
+      return res.status(200).json(allWebhooks);
     } catch (error) {
       console.error('Erro ao listar webhooks:', error);
       return res.status(500).json({
