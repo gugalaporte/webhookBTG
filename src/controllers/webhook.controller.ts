@@ -9,6 +9,7 @@ if (!fs.existsSync(dataDir)) {
 }
 
 const API_KEY = 'finacap2025';
+const BTG_OPERATIONS_ENDPOINT = 'https://api.btgpactual.com/api-operations-search/api/v1/operations-search';
 
 // Interface para os dados do BTG
 interface BTGWebhookResponse {
@@ -48,14 +49,10 @@ export class WebhookController {
         });
       }
 
-      // Determina o tipo de webhook baseado nos dados
-      const isOperationsByAccount = !!webhookData.response.accountNumber;
-      const webhookType = isOperationsByAccount ? 'operations-by-account' : 'positions-by-partner';
-
       // Dados formatados com metadata
       const dataWithMetadata = {
         timestamp: new Date(),
-        webhookType,
+        endpoint: BTG_OPERATIONS_ENDPOINT,
         data: webhookData,
         metadata: {
           accountNumber: webhookData.response.accountNumber || 'N/A',
@@ -63,21 +60,22 @@ export class WebhookController {
           period: webhookData.response.startDate && webhookData.response.endDate 
             ? `${webhookData.response.startDate} até ${webhookData.response.endDate}`
             : 'N/A',
-          downloadUrl: webhookData.response.url
+          downloadUrl: webhookData.response.url,
+          lastModified: webhookData.response.lastModified || 'N/A'
         }
       };
 
-      // Cria subdiretório para o tipo de webhook
-      const typeDir = path.join(dataDir, webhookType);
-      if (!fs.existsSync(typeDir)) {
-        fs.mkdirSync(typeDir, { recursive: true });
+      // Cria subdiretório para operações
+      const operationsDir = path.join(dataDir, 'operations');
+      if (!fs.existsSync(operationsDir)) {
+        fs.mkdirSync(operationsDir, { recursive: true });
       }
 
       // Salva em arquivo JSON com nome mais descritivo
-      const fileName = `${webhookType}-${
-        webhookData.response.accountNumber || 'partner'
+      const fileName = `operations-${
+        webhookData.response.accountNumber || 'unknown'
       }-${Date.now()}.json`;
-      const filePath = path.join(typeDir, fileName);
+      const filePath = path.join(operationsDir, fileName);
       
       fs.writeFileSync(
         filePath,
@@ -85,24 +83,23 @@ export class WebhookController {
       );
 
       console.log('Dados salvos em:', filePath);
-      console.log('Tipo de webhook:', webhookType);
+      console.log('Endpoint:', BTG_OPERATIONS_ENDPOINT);
       console.log('URL do arquivo:', webhookData.response.url);
 
       return res.status(200).json({
-        message: 'Webhook processada com sucesso',
+        message: 'Operações recebidas com sucesso',
         fileName,
-        webhookType,
         metadata: dataWithMetadata.metadata
       });
     } catch (error) {
-      console.error('Erro ao processar webhook:', error);
+      console.error('Erro ao processar operações:', error);
       return res.status(500).json({
-        message: 'Erro ao processar webhook'
+        message: 'Erro ao processar operações'
       });
     }
   }
 
-  // Método auxiliar para listar todos os arquivos de webhook
+  // Método auxiliar para listar todas as operações recebidas
   async listWebhookFiles(req: Request, res: Response) {
     try {
       // Validação da API Key
@@ -114,31 +111,30 @@ export class WebhookController {
         });
       }
 
-      // Lista webhooks por tipo
-      const webhookTypes = ['operations-by-account', 'positions-by-partner'];
-      const allWebhooks: any = {};
-
-      for (const type of webhookTypes) {
-        const typeDir = path.join(dataDir, type);
-        if (fs.existsSync(typeDir)) {
-          const files = fs.readdirSync(typeDir);
-          allWebhooks[type] = files.map(file => {
-            const content = fs.readFileSync(path.join(typeDir, file), 'utf-8');
-            return {
-              fileName: file,
-              data: JSON.parse(content)
-            };
-          });
-        } else {
-          allWebhooks[type] = [];
-        }
+      const operationsDir = path.join(dataDir, 'operations');
+      if (!fs.existsSync(operationsDir)) {
+        return res.status(200).json({
+          operations: []
+        });
       }
 
-      return res.status(200).json(allWebhooks);
+      const files = fs.readdirSync(operationsDir);
+      const operations = files.map(file => {
+        const content = fs.readFileSync(path.join(operationsDir, file), 'utf-8');
+        return {
+          fileName: file,
+          data: JSON.parse(content)
+        };
+      });
+
+      return res.status(200).json({
+        endpoint: BTG_OPERATIONS_ENDPOINT,
+        operations
+      });
     } catch (error) {
-      console.error('Erro ao listar webhooks:', error);
+      console.error('Erro ao listar operações:', error);
       return res.status(500).json({
-        message: 'Erro ao listar webhooks'
+        message: 'Erro ao listar operações'
       });
     }
   }
